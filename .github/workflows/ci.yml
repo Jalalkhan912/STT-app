@@ -32,3 +32,45 @@ jobs:
             [ -s "$dir/$f" ] || curl -fL -o "$dir/$f" "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/main/$f"
           done
       - run: DICTATION_MODELS=~/models cargo test -p dictation-core --features parakeet --test accuracy -- --ignored --nocapture
+  app:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: UI install and test
+        working-directory: ui
+        run: |
+          npm ci
+          npm test
+      - name: UI build
+        working-directory: ui
+        run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Vulkan SDK
+        if: runner.os == 'Windows'
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: latest
+          cache: true
+      - run: cargo test -p dictation-app
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: src-tauri
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.os }}
+          path: |
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

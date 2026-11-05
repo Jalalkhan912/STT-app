@@ -4,3 +4,4 @@ ui/dist/
 *.part
 crates/core/tests/models/
 .superpowers/
+src-tauri/gen/

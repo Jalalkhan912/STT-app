@@ -1,0 +1,30 @@
+[package]
+name = "dictation-app"
+version = "0.1.0"
+edition = "2021"
+description = "Offline push-to-talk dictation"
+
+[lib]
+name = "dictation_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5", features = [] }
+
+[dependencies]
+dictation-core = { path = "../crates/core" }
+tauri = { version = "2.12", features = ["tray-icon", "macos-private-api", "protocol-asset"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-log = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+dictation-core = { path = "../crates/core", features = ["parakeet", "whisper-metal"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+dictation-core = { path = "../crates/core", features = ["parakeet", "whisper-vulkan"] }
