@@ -85,7 +85,7 @@ pub fn catalog() -> Vec<ModelInfo> {
                     p,
                     "vocab.txt",
                     9384,
-                    "f9e52fa25130a1285be756011a6e5cbd064810781816832581d76a6d7dc31734",
+                    "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d",
                 ),
             ],
         },

@@ -566,7 +566,7 @@ Catalog values (URLs use the `https://huggingface.co/<repo>/resolve/main/<file>`
 | `parakeet-tdt-0.6b-v2-int8` | Parakeet TDT 0.6B v2 (English, recommended) | `encoder-model.int8.onnx` | 652184014 | `3e0581fda6ab843888b51e56d7ee78b6d5bc3237ec113af1f732d1d5286aa155` |
 | ″ | ″ | `decoder_joint-model.int8.onnx` | 8998286 | `a449f49acd68979d418651dd2dcb737cc0f1bf0225e009e29ee326354edbf7d3` |
 | ″ | ″ | `nemo128.onnx` | 139764 | `a9fde1486ebfcc08f328d75ad4610c67835fea58c73ba57e3209a6f6cf019e9f` |
-| ″ | ″ | `vocab.txt` | 9384 | `f9e52fa25130a1285be756011a6e5cbd064810781816832581d76a6d7dc31734` |
+| ″ | ″ | `vocab.txt` | 9384 | `ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d` |
 | `whisper-large-v3-turbo-q5` | Whisper large-v3 turbo (GPU) | `ggml-large-v3-turbo-q5_0.bin` | 574041195 | `394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2` |
 
 The Parakeet repo is `istupakov/parakeet-tdt-0.6b-v2-onnx`. The Whisper repo is `ggerganov/whisper.cpp`.

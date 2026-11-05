@@ -165,3 +165,49 @@ fn import_verifies() {
     let r = import_file(&root2, &m, "x.bin", Path::new(&src));
     assert!(matches!(r, Err(ModelError::UnknownFile(ref n)) if n == "x.bin"));
 }
+
+#[test]
+fn catalog_pins_parakeet_hashes() {
+    let flat = |id: &str| -> Vec<(String, u64, String)> {
+        find(id)
+            .unwrap()
+            .files
+            .into_iter()
+            .map(|f| (f.name, f.size, f.sha256))
+            .collect()
+    };
+    let t = |n: &str, s: u64, h: &str| (n.to_string(), s, h.to_string());
+    assert_eq!(
+        flat("parakeet-tdt-0.6b-v2-int8"),
+        vec![
+            t(
+                "encoder-model.int8.onnx",
+                652184014,
+                "3e0581fda6ab843888b51e56d7ee78b6d5bc3237ec113af1f732d1d5286aa155"
+            ),
+            t(
+                "decoder_joint-model.int8.onnx",
+                8998286,
+                "a449f49acd68979d418651dd2dcb737cc0f1bf0225e009e29ee326354edbf7d3"
+            ),
+            t(
+                "nemo128.onnx",
+                139764,
+                "a9fde1486ebfcc08f328d75ad4610c67835fea58c73ba57e3209a6f6cf019e9f"
+            ),
+            t(
+                "vocab.txt",
+                9384,
+                "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d"
+            ),
+        ]
+    );
+    assert_eq!(
+        flat("whisper-large-v3-turbo-q5"),
+        vec![t(
+            "ggml-large-v3-turbo-q5_0.bin",
+            574041195,
+            "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+        )]
+    );
+}
