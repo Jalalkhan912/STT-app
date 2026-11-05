@@ -7,6 +7,7 @@ edition = "2021"
 name = "dictation_core"
 
 [dependencies]
+regex = "1.13.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 transcribe-rs = { version = "0.3.12", optional = true, default-features = false }
