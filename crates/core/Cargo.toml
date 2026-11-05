@@ -1,0 +1,16 @@
+[package]
+name = "dictation-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "dictation_core"
+
+[dependencies]
+transcribe-rs = { version = "0.3.12", optional = true, default-features = false }
+
+[features]
+parakeet = ["transcribe-rs/onnx", "transcribe-rs/vad-silero"]
+whisper = ["transcribe-rs/whisper-cpp"]
+whisper-metal = ["whisper", "transcribe-rs/whisper-metal"]
+whisper-vulkan = ["whisper", "transcribe-rs/whisper-vulkan"]

@@ -165,3 +165,11 @@ Catalog = URL + SHA-256 + size. Download resumes after interruption, and the SHA
 - **Engine accuracy**: small set of English WAV clips with reference transcripts; assert WER below threshold; print a timing benchmark (real-time factor).
 - **Manual checklist per OS**: hotkey in browser/Slack/VS Code/Word; paste + clipboard restore; permissions flow; overlay never takes focus; Esc cancel; elevated-window fallback on Windows; long (> 2 min) dictation.
 - The development server has no display/mic; the real app is tested by the user on their Mac/Windows machines, with CI builds as the source of installers.
+
+## 11. Planning amendments
+
+- Parakeet runs on CPU on every platform in v1. ORT GPU providers are deferred and revisited only if the Task 8 benchmark misses the ~1 s target.
+- Whisper GPU: Metal on macOS, **Vulkan** on Windows (works on NVIDIA without a CUDA toolkit; replaces the "optional CUDA download").
+- The `whisper-distil-large-v3.en` entry is removed: there's no maintained English-only distil GGML build. Turbo q5 remains.
+- Microphone: by default the stream opens on key down. Setting `mic_always_on` (default `false`) keeps it warm, which enables the 200 ms pre-roll; the OS mic indicator then stays on. With it off, pre-roll is whatever arrives after the stream opens.
+- VAD is Silero v4 (`silero_vad_v4.onnx`, 1 807 522 bytes, sha256 `a35ebf52fd3ce5f1469b2a36158dba761bc47b973ea3382b3186ca15b1f5af28`), bundled as a Tauri resource.

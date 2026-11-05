@@ -1,0 +1,6 @@
+target/
+node_modules/
+ui/dist/
+*.part
+crates/core/tests/models/
+.superpowers/
