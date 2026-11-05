@@ -81,26 +81,32 @@ mod whisper {
     use std::path::Path;
     use transcribe_rs::whisper_cpp::{WhisperEngine as Inner, WhisperInferenceParams};
 
-    pub struct WhisperEngine(Inner);
+    pub struct WhisperEngine {
+        inner: Inner,
+        id: String,
+    }
 
     impl WhisperEngine {
-        pub fn load(file: &Path) -> Result<Self, SpeechError> {
+        pub fn load(file: &Path, id: impl Into<String>) -> Result<Self, SpeechError> {
             Inner::load(file)
-                .map(Self)
+                .map(|inner| Self {
+                    inner,
+                    id: id.into(),
+                })
                 .map_err(|e| SpeechError::Engine(e.to_string()))
         }
     }
 
     impl Engine for WhisperEngine {
         fn id(&self) -> &str {
-            "whisper"
+            &self.id
         }
         fn transcribe(&mut self, s: &[f32]) -> Result<String, SpeechError> {
             let params = WhisperInferenceParams {
                 language: Some("en".into()),
                 ..Default::default()
             };
-            self.0
+            self.inner
                 .transcribe_with(s, &params)
                 .map(|r| r.text)
                 .map_err(|e| SpeechError::Engine(e.to_string()))

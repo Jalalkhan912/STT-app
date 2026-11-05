@@ -55,7 +55,13 @@ impl Speech for SpeechPipeline {
     }
 
     fn process(&mut self, s: &[f32]) -> Result<Option<String>, SpeechError> {
-        let flags = speech_frames(self.detector.as_mut(), s)?;
+        let flags = match speech_frames(self.detector.as_mut(), s) {
+            Ok(f) => f,
+            Err(e) => {
+                self.detector.reset();
+                return Err(e);
+            }
+        };
         if !has_speech(&flags) {
             self.detector.reset();
             return Ok(None);
