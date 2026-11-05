@@ -97,6 +97,8 @@ pub fn delete_dictation(state: S, id: String) -> Result<(), String> {
 }
 
 fn retranscribe_blocking(state: &AppState, id: &str) -> Result<Dictation, String> {
+    // The model may have been unloaded for idleness.
+    models_mgr::ensure_loaded(state);
     let d = state
         .history
         .get(id)

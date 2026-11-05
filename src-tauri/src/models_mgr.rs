@@ -47,8 +47,14 @@ fn build_pipeline(
 
 /// Builds and warms the pipeline for `settings.active_model` without holding
 /// the speech lock, then locks only to swap it in.
-pub fn load_active(state: &AppState, vad_path: &Path) -> Result<(), String> {
+///
+/// With `force == false` it returns early if a model is already loaded
+/// (checked after taking the load lock, so concurrent callers don't rebuild).
+pub fn load_active(state: &AppState, vad_path: &Path, force: bool) -> Result<(), String> {
     let _serial = state.load_lock.lock().unwrap_or_else(|e| e.into_inner());
+    if !force && state.speech.lock().map(|s| s.is_some()).unwrap_or(false) {
+        return Ok(());
+    }
     let id = state.settings_snapshot().active_model;
     let m = models::find(&id).ok_or_else(|| format!("unknown model {id}"))?;
     let root = paths::models_dir();
@@ -80,7 +86,7 @@ pub fn load_active(state: &AppState, vad_path: &Path) -> Result<(), String> {
 /// Loads the active model on a background thread.
 pub fn spawn_load(state: Arc<AppState>) {
     std::thread::spawn(move || {
-        if let Err(e) = load_active(&state, &state.vad_path) {
+        if let Err(e) = load_active(&state, &state.vad_path, true) {
             log::warn!("model load: {e}");
         }
     });
@@ -89,11 +95,8 @@ pub fn spawn_load(state: Arc<AppState>) {
 /// Synchronous load used by the hotkey handler when the model was unloaded
 /// for idleness. Does nothing if a model is already loaded.
 pub fn ensure_loaded(state: &AppState) {
-    let loaded = state.speech.lock().map(|s| s.is_some()).unwrap_or(false);
-    if !loaded {
-        if let Err(e) = load_active(state, &state.vad_path) {
-            log::warn!("model load: {e}");
-        }
+    if let Err(e) = load_active(state, &state.vad_path, false) {
+        log::warn!("model load: {e}");
     }
 }
 

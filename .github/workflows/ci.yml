@@ -36,7 +36,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-latest]
+        include:
+          - os: macos-14
+            bundle: dmg
+          - os: windows-latest
+            bundle: nsis
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -62,11 +66,19 @@ jobs:
           version: latest
           cache: true
       - run: cargo test -p dictation-app
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache cargo-tauri
+        id: tauri-cli-cache
+        uses: actions/cache@v4
         with:
-          projectPath: src-tauri
+          path: ~/.cargo/bin/cargo-tauri*
+          key: cargo-tauri-2-${{ runner.os }}
+      - name: Install tauri-cli
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version "^2" --locked
+      - uses: tauri-apps/tauri-action@v0
+        with:
+          tauriScript: cargo tauri
+          args: --bundles ${{ matrix.bundle }}
       - uses: actions/upload-artifact@v4
         with:
           name: bundles-${{ matrix.os }}
