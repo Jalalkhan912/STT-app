@@ -32,6 +32,7 @@ fn new_paragraph_beats_new_line() {
     assert_eq!(c("One. New paragraph. Two."), "One.\n\nTwo. ");
 }
 #[test]
+#[allow(clippy::field_reassign_with_default)]
 fn vocabulary_fixes_case() {
     let mut cfg = CleanupConfig::default();
     cfg.vocabulary = vec!["Kubernetes".into()];
