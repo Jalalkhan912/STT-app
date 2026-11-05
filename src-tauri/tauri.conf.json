@@ -52,6 +52,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources/silero_vad_v4.onnx"]
+    "resources": ["resources/silero_vad_v4.onnx"],
+    "macOS": { "minimumSystemVersion": "12.0" }
   }
 }

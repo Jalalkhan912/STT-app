@@ -84,10 +84,14 @@ jobs:
         with:
           tauriScript: cargo tauri
           args: --bundles ${{ matrix.bundle }}
+      - name: Collect bundles
+        shell: bash
+        run: |
+          mkdir -p out
+          find "${CARGO_TARGET_DIR:-target}/release/bundle" \( -name '*.dmg' -o -name '*-setup.exe' \) -exec cp {} out/ \;
+          ls -l out
       - uses: actions/upload-artifact@v4
         with:
           name: bundles-${{ matrix.os }}
-          path: |
-            target/release/bundle/dmg/*.dmg
-            D:/t/release/bundle/nsis/*-setup.exe
+          path: out/*
           if-no-files-found: error
