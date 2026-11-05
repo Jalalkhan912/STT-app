@@ -14,3 +14,21 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy -p dictation-core -- -D warnings
       - run: cargo test -p dictation-core
+  engine-accuracy:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/models
+          key: models-parakeet-tdt-0.6b-v2-int8
+      - name: Download Parakeet model
+        run: |
+          dir=~/models/parakeet-tdt-0.6b-v2-int8
+          mkdir -p "$dir"
+          for f in encoder-model.int8.onnx decoder_joint-model.int8.onnx nemo128.onnx vocab.txt; do
+            [ -s "$dir/$f" ] || curl -fL -o "$dir/$f" "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/main/$f"
+          done
+      - run: DICTATION_MODELS=~/models cargo test -p dictation-core --features parakeet --test accuracy -- --ignored --nocapture
