@@ -61,10 +61,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install Vulkan SDK
         if: runner.os == 'Windows'
-        uses: humbletim/install-vulkan-sdk@v1.2
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
         with:
-          version: latest
-          cache: true
+          vulkan-query-version: 1.4.309.0
+          vulkan-components: Vulkan-Headers, Vulkan-Loader
+          vulkan-use-cache: true
       - run: cargo test -p dictation-app
       - name: Cache cargo-tauri
         id: tauri-cli-cache
