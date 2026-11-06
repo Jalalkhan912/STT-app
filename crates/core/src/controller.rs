@@ -7,10 +7,10 @@ use crate::settings::{CleanupConfig, Retention};
 use crate::speech::Speech;
 use serde::Serialize;
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock, TryLockError};
 
 /// Releases shorter than this are treated as accidental taps.
-const MIN_HOLD_MS: u64 = 300;
+pub const MIN_HOLD_MS: u64 = 300;
 
 pub trait Recorder: Send {
     fn start(&mut self) -> Result<(), String>;
@@ -28,6 +28,8 @@ pub enum PasteOutcome {
 pub trait Paster: Send {
     fn focused_app(&self) -> Option<String>;
     fn paste(&mut self, text: &str) -> PasteOutcome;
+    /// Puts the text on the clipboard without sending a paste keystroke.
+    fn copy_only(&mut self, text: &str);
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -41,6 +43,8 @@ pub enum OverlayState {
     Copied,
     MicError(String),
     NoModel,
+    /// A press arrived while the model was still loading.
+    Loading,
     Error(String),
 }
 
@@ -72,6 +76,7 @@ pub struct Controller {
     config: Arc<RwLock<ControllerConfig>>,
     now_ms: Box<dyn Fn() -> i64 + Send>,
     state: State,
+    on_saved: Option<Box<dyn Fn() + Send>>,
 }
 
 impl Controller {
@@ -93,7 +98,13 @@ impl Controller {
             config,
             now_ms,
             state: State::Idle,
+            on_saved: None,
         }
+    }
+
+    /// Called after a dictation row has been written to history.
+    pub fn set_on_saved(&mut self, f: Box<dyn Fn() + Send>) {
+        self.on_saved = Some(f);
     }
 
     pub fn handle(&mut self, ev: Event) {
@@ -119,19 +130,31 @@ impl Controller {
     }
 
     fn on_press(&mut self, at_ms: u64) {
-        if self.speech.lock().map(|s| s.is_none()).unwrap_or(true) {
-            self.overlay.set(OverlayState::NoModel);
-            return;
+        // try_lock: a busy lock means inference or a retranscribe holds the
+        // model, so it is loaded. Never wait for it here.
+        match self.speech.try_lock() {
+            Ok(guard) if guard.is_none() => {
+                self.overlay.set(OverlayState::NoModel);
+                return;
+            }
+            Err(TryLockError::Poisoned(_)) => {
+                self.overlay
+                    .set(OverlayState::Error("speech engine unavailable".into()));
+                return;
+            }
+            Ok(_) | Err(TryLockError::WouldBlock) => {}
         }
+        // Feedback first: opening the audio stream can take a while.
+        self.overlay.set(OverlayState::Recording);
+        let app = self.paster.focused_app();
         if let Err(e) = self.recorder.start() {
             self.overlay.set(OverlayState::MicError(e));
             return;
         }
         self.state = State::Recording {
             started_ms: at_ms,
-            app: self.paster.focused_app(),
+            app,
         };
-        self.overlay.set(OverlayState::Recording);
     }
 
     fn cancel(&mut self) {
@@ -180,7 +203,7 @@ impl Controller {
             text: String::new(),
             raw_text: String::new(),
             model,
-            target_app: app,
+            target_app: app.clone(),
             status: Status::NoSpeech,
         };
         let mut audio: Option<&[f32]> = None;
@@ -198,7 +221,17 @@ impl Controller {
                 } else {
                     row.raw_text = raw;
                     audio = keep_audio.then_some(samples.as_slice());
-                    match self.paster.paste(&text) {
+                    let focus_moved = matches!(
+                        (&app, self.paster.focused_app()),
+                        (Some(a), Some(b)) if *a != b
+                    );
+                    let outcome = if focus_moved {
+                        self.paster.copy_only(&text);
+                        PasteOutcome::CopiedOnly
+                    } else {
+                        self.paster.paste(&text)
+                    };
+                    match outcome {
                         PasteOutcome::Pasted => {
                             self.overlay.set(OverlayState::Done);
                             row.status = Status::Pasted;
@@ -212,8 +245,13 @@ impl Controller {
                 }
             }
         }
-        if let Err(e) = self.history.add(row, audio) {
-            eprintln!("failed to save dictation: {e}");
+        match self.history.add(row, audio) {
+            Ok(_) => {
+                if let Some(f) = &self.on_saved {
+                    f();
+                }
+            }
+            Err(e) => eprintln!("failed to save dictation: {e}"),
         }
         true
     }

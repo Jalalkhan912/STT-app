@@ -64,8 +64,46 @@ fn empty_spec_never_activates() {
 fn set_spec_resets_state() {
     let mut h = t(&["AltRight"]);
     h.on_key("AltRight", true, 1);
-    h.set_spec(HotkeySpec {
-        keys: vec!["F9".into()],
-    });
+    h.set_spec(
+        HotkeySpec {
+            keys: vec!["F9".into()],
+        },
+        1,
+    );
     assert_eq!(h.on_key("F9", true, 2), Some(Event::Pressed { at_ms: 2 }));
+}
+
+fn spec(keys: &[&str]) -> HotkeySpec {
+    HotkeySpec {
+        keys: keys.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+#[test]
+fn set_spec_while_held_releases() {
+    let mut h = t(&["AltRight"]);
+    h.on_key("AltRight", true, 1000);
+    assert_eq!(
+        h.set_spec(spec(&["F9"]), 2000),
+        Some(Event::Released { at_ms: 2000 })
+    );
+    // The old key going up afterwards is not a second release.
+    assert_eq!(h.on_key("AltRight", false, 2100), None);
+    assert_eq!(
+        h.on_key("F9", true, 2200),
+        Some(Event::Pressed { at_ms: 2200 })
+    );
+}
+
+#[test]
+fn set_spec_during_short_hold_cancels() {
+    let mut h = t(&["AltRight"]);
+    h.on_key("AltRight", true, 1000);
+    assert_eq!(h.set_spec(spec(&["F9"]), 1100), Some(Event::Cancel));
+}
+
+#[test]
+fn set_spec_when_idle_emits_nothing() {
+    let mut h = t(&["AltRight"]);
+    assert_eq!(h.set_spec(spec(&["F9"]), 5), None);
 }

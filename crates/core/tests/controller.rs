@@ -51,14 +51,19 @@ impl Speech for FakeSpeech {
 struct FakePaster {
     outcome: PasteOutcome,
     log: Arc<Mutex<Vec<String>>>,
+    copied: Arc<Mutex<Vec<String>>>,
+    focus: Arc<Mutex<Option<String>>>,
 }
 impl Paster for FakePaster {
     fn focused_app(&self) -> Option<String> {
-        Some("TestApp".into())
+        self.focus.lock().unwrap().clone()
     }
     fn paste(&mut self, text: &str) -> PasteOutcome {
         self.log.lock().unwrap().push(text.to_string());
         self.outcome
+    }
+    fn copy_only(&mut self, text: &str) {
+        self.copied.lock().unwrap().push(text.to_string());
     }
 }
 
@@ -73,6 +78,9 @@ struct Rig {
     ctrl: Controller,
     rec: Arc<Mutex<RecState>>,
     pasted: Arc<Mutex<Vec<String>>>,
+    copied: Arc<Mutex<Vec<String>>>,
+    focus: Arc<Mutex<Option<String>>>,
+    speech: SharedSpeech,
     overlay: Arc<Mutex<Vec<OverlayState>>>,
     history: Arc<History>,
     config: Arc<RwLock<ControllerConfig>>,
@@ -84,6 +92,8 @@ fn rig_with(speech: Option<Result<Option<String>, String>>, outcome: PasteOutcom
     let history = Arc::new(History::open(dir.path()).unwrap());
     let rec = Arc::new(Mutex::new(RecState::default()));
     let pasted = Arc::new(Mutex::new(Vec::new()));
+    let copied = Arc::new(Mutex::new(Vec::new()));
+    let focus = Arc::new(Mutex::new(Some("TestApp".to_string())));
     let overlay = Arc::new(Mutex::new(Vec::new()));
     let config = Arc::new(RwLock::new(ControllerConfig {
         cleanup: CleanupConfig::default(),
@@ -94,10 +104,12 @@ fn rig_with(speech: Option<Result<Option<String>, String>>, outcome: PasteOutcom
     ));
     let ctrl = Controller::new(
         Box::new(FakeRecorder(rec.clone())),
-        speech,
+        speech.clone(),
         Box::new(FakePaster {
             outcome,
             log: pasted.clone(),
+            copied: copied.clone(),
+            focus: focus.clone(),
         }),
         Box::new(FakeOverlay(overlay.clone())),
         history.clone(),
@@ -108,6 +120,9 @@ fn rig_with(speech: Option<Result<Option<String>, String>>, outcome: PasteOutcom
         ctrl,
         rec,
         pasted,
+        copied,
+        focus,
+        speech,
         overlay,
         history,
         config,
@@ -189,7 +204,7 @@ fn mic_start_failure_shows_mic_error() {
     r.ctrl.handle(Event::Pressed { at_ms: 0 });
     assert!(matches!(
         r.overlay.lock().unwrap().as_slice(),
-        [OverlayState::MicError(_)]
+        [OverlayState::Recording, OverlayState::MicError(_)]
     ));
     r.ctrl.handle(Event::Released { at_ms: 1000 });
     assert!(!r.rec.lock().unwrap().calls.contains(&"stop"));
@@ -312,4 +327,124 @@ fn run_drops_presses_queued_during_processing() {
     run(r.ctrl, rx);
     assert_eq!(r.history.list(None, 10).unwrap().len(), 1);
     assert_eq!(r.pasted.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn overlay_shows_recording_before_recorder_starts() {
+    // The recorder reads the overlay log when start() runs.
+    struct Probe {
+        overlay: Arc<Mutex<Vec<OverlayState>>>,
+        seen: Arc<Mutex<Vec<OverlayState>>>,
+    }
+    impl Recorder for Probe {
+        fn start(&mut self) -> Result<(), String> {
+            *self.seen.lock().unwrap() = self.overlay.lock().unwrap().clone();
+            Ok(())
+        }
+        fn stop(&mut self) -> Result<Vec<f32>, String> {
+            Ok(vec![0.1; 16_000])
+        }
+        fn cancel(&mut self) {}
+    }
+    let r = rig(Ok(Some("hi".into())));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctrl = Controller::new(
+        Box::new(Probe {
+            overlay: r.overlay.clone(),
+            seen: seen.clone(),
+        }),
+        r.speech.clone(),
+        Box::new(FakePaster {
+            outcome: PasteOutcome::Pasted,
+            log: r.pasted.clone(),
+            copied: r.copied.clone(),
+            focus: r.focus.clone(),
+        }),
+        Box::new(FakeOverlay(r.overlay.clone())),
+        Arc::new(History::open(dir.path()).unwrap()),
+        r.config.clone(),
+        Box::new(|| 0),
+    );
+    ctrl.handle(Event::Pressed { at_ms: 0 });
+    assert_eq!(*seen.lock().unwrap(), vec![OverlayState::Recording]);
+}
+
+#[test]
+fn press_while_speech_is_busy_still_records() {
+    let mut r = rig(Ok(Some("hello".into())));
+    let busy = r.speech.lock().unwrap(); // inference or retranscribe in progress
+    r.ctrl.handle(Event::Pressed { at_ms: 0 });
+    assert_eq!(*r.overlay.lock().unwrap(), vec![OverlayState::Recording]);
+    assert!(r.rec.lock().unwrap().calls.contains(&"start"));
+    drop(busy);
+    r.ctrl.handle(Event::Released { at_ms: 1000 });
+    assert_eq!(r.overlay.lock().unwrap().last(), Some(&OverlayState::Done));
+}
+
+#[test]
+fn poisoned_speech_lock_is_an_error_on_press() {
+    let mut r = rig(Ok(Some("hello".into())));
+    let sp = r.speech.clone();
+    let _ = std::thread::spawn(move || {
+        let _g = sp.lock().unwrap();
+        panic!("poison");
+    })
+    .join();
+    r.ctrl.handle(Event::Pressed { at_ms: 0 });
+    assert!(matches!(
+        r.overlay.lock().unwrap().as_slice(),
+        [OverlayState::Error(_)]
+    ));
+    assert!(!r.rec.lock().unwrap().calls.contains(&"start"));
+}
+
+#[test]
+fn focus_change_between_press_and_paste_copies_only() {
+    let mut r = rig(Ok(Some("hello".into())));
+    r.ctrl.handle(Event::Pressed { at_ms: 0 });
+    *r.focus.lock().unwrap() = Some("OtherApp".into());
+    r.ctrl.handle(Event::Released { at_ms: 1000 });
+    assert!(r.pasted.lock().unwrap().is_empty());
+    assert_eq!(*r.copied.lock().unwrap(), vec!["Hello "]);
+    assert_eq!(
+        r.overlay.lock().unwrap().last(),
+        Some(&OverlayState::Copied)
+    );
+    let rows = r.history.list(None, 10).unwrap();
+    assert_eq!(rows[0].status, Status::CopiedOnly);
+    assert_eq!(rows[0].target_app.as_deref(), Some("TestApp"));
+}
+
+#[test]
+fn unknown_focus_still_pastes() {
+    let mut r = rig(Ok(Some("hello".into())));
+    r.ctrl.handle(Event::Pressed { at_ms: 0 });
+    *r.focus.lock().unwrap() = None;
+    r.ctrl.handle(Event::Released { at_ms: 1000 });
+    assert_eq!(r.pasted.lock().unwrap().len(), 1);
+    assert!(r.copied.lock().unwrap().is_empty());
+}
+
+#[test]
+fn on_saved_hook_runs_after_history_row_exists() {
+    let mut r = rig(Ok(Some("hello".into())));
+    let seen_rows = Arc::new(Mutex::new(Vec::new()));
+    let (h, rows) = (r.history.clone(), seen_rows.clone());
+    r.ctrl.set_on_saved(Box::new(move || {
+        rows.lock().unwrap().push(h.list(None, 10).unwrap().len());
+    }));
+    press_release(&mut r, 0, 1000);
+    assert_eq!(*seen_rows.lock().unwrap(), vec![1]);
+}
+
+#[test]
+fn on_saved_hook_not_called_for_cancelled_take() {
+    let mut r = rig(Ok(Some("hello".into())));
+    let calls = Arc::new(Mutex::new(0));
+    let c = calls.clone();
+    r.ctrl
+        .set_on_saved(Box::new(move || *c.lock().unwrap() += 1));
+    press_release(&mut r, 0, 100);
+    assert_eq!(*calls.lock().unwrap(), 0);
 }
