@@ -23,6 +23,11 @@ macOS needs three permissions (the first-run screen walks you through them):
 
 With ad-hoc signing, macOS may ask for Accessibility and Input Monitoring again after each update. Remove the old Dictation entry in System Settings → Privacy & Security and add it again.
 
+### Troubleshooting permissions (macOS)
+- Check the microphone entitlement is in the build: `codesign -d --entitlements - /Applications/Dictation.app` should list `com.apple.security.device.audio-input`.
+- Reset stale permission entries (for example after installing a new build): `tccutil reset All app.dictation.desktop`, then reopen the app and grant them again.
+- If you previously clicked "Don't Allow" for the microphone, macOS won't ask again; enable Dictation under System Settings → Privacy & Security → Microphone.
+
 Windows needs no special permissions. Pasting into an elevated (administrator) window is not possible; the text is copied and you press Ctrl+V.
 
 ## Where data lives
