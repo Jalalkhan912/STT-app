@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { isMac, listModels, permissionStatus } from "./api";
+  import { getSettings, isMac, listModels, permissionStatus } from "./api";
   import FirstRun from "./FirstRun.svelte";
   import History from "./History.svelte";
   import Settings from "./Settings.svelte";
@@ -10,6 +10,22 @@
   let tab: Tab = $state("history");
   // null while the initial check runs.
   let needsSetup: boolean | null = $state(null);
+  let activeMissing = $state(false);
+
+  // Another model is installed but the active one is not: dictation would fail.
+  async function checkActive() {
+    try {
+      const [models, s] = await Promise.all([listModels(), getSettings()]);
+      const active = models.find((m) => m.info.id === s.active_model);
+      activeMissing = !active?.installed && models.some((m) => m.installed);
+    } catch {
+      activeMissing = false;
+    }
+  }
+  $effect(() => {
+    tab; // re-check whenever the user switches screens
+    if (needsSetup === false) checkActive();
+  });
 
   onMount(async () => {
     try {
@@ -43,6 +59,12 @@
       {/each}
     </nav>
     <main>
+      {#if activeMissing && tab !== "models"}
+        <div class="banner">
+          Active model not installed —
+          <button class="link" onclick={() => (tab = "models")}>choose one in Models</button>
+        </div>
+      {/if}
       {#if tab === "history"}<History />{:else if tab === "settings"}<Settings />{:else}<Models />{/if}
     </main>
   </div>
@@ -60,5 +82,9 @@
   }
   .navitem:hover { background: var(--hover) !important; }
   .navitem.active { background: var(--accent) !important; color: var(--accent-fg); }
+  .banner {
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; margin-bottom: 12px;
+    color: var(--danger);
+  }
   main { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 20px; }
 </style>

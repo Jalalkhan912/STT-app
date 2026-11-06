@@ -21,32 +21,44 @@
 
   const groups = $derived(groupByDay(items, new Date()));
 
+  const SEARCH_CAP = 200;
+  let seq = 0;
+  let capped = $state(false);
+  let exporting = $state(false);
+  let notice = $state("");
+
   async function load(reset: boolean) {
+    const my = ++seq;
+    const q = query.trim();
     loading = true;
     error = "";
     try {
-      const q = query.trim();
-      let page: Dictation[];
       if (q) {
         // Search is not paginated.
-        page = await searchHistory(q, 200);
+        const page = await searchHistory(q, SEARCH_CAP);
+        if (my !== seq) return;
         hasMore = false;
+        capped = page.length >= SEARCH_CAP;
         items = page;
       } else {
         const before = reset ? undefined : items[items.length - 1]?.id;
-        page = await listHistory(before, PAGE);
+        const page = await listHistory(before, PAGE);
+        if (my !== seq) return;
+        capped = false;
         hasMore = page.length === PAGE;
         items = reset ? page : [...items, ...page];
       }
     } catch (e) {
-      error = String(e);
+      if (my === seq) error = String(e);
     } finally {
-      loading = false;
+      if (my === seq) loading = false;
     }
   }
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   function onInput() {
+    // Invalidate any in-flight load right away (including Load more).
+    seq++;
     clearTimeout(timer);
     timer = setTimeout(() => load(true), 250);
   }
@@ -107,27 +119,38 @@
   }
 
   async function doExport(kind: "json" | "csv" | "audio") {
+    if (exporting) return;
+    exporting = true;
+    notice = "";
     const ext = kind === "audio" ? "zip" : kind;
     try {
       const path = await save({
         defaultPath: `dictation-history.${ext}`,
         filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
       });
-      if (path) await exportHistory(kind, path);
+      if (path) {
+        await exportHistory(kind, path);
+        notice = "Export saved.";
+        setTimeout(() => (notice = ""), 3000);
+      }
     } catch (e) {
       error = String(e);
+    } finally {
+      exporting = false;
     }
   }
 </script>
 
 <div class="bar row">
   <input class="grow" type="search" placeholder="Search dictations" bind:value={query} oninput={onInput} />
-  <button onclick={() => doExport("json")}>Export JSON</button>
-  <button onclick={() => doExport("csv")}>Export CSV</button>
-  <button onclick={() => doExport("audio")}>Export audio</button>
+  <button disabled={exporting} onclick={() => doExport("json")}>Export JSON</button>
+  <button disabled={exporting} onclick={() => doExport("csv")}>Export CSV</button>
+  <button disabled={exporting} onclick={() => doExport("audio")}>Export audio</button>
 </div>
 
 {#if error}<p class="error small">{error}</p>{/if}
+{#if notice}<p class="small muted">{notice}</p>{/if}
+{#if capped}<p class="small muted">Showing first {SEARCH_CAP} results</p>{/if}
 
 {#each groups as g (g.label)}
   <h2>{g.label}</h2>
@@ -146,7 +169,7 @@
         </div>
         {#if playing?.id === d.id}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <audio controls autoplay src={playing.src} onended={() => (playing = null)}></audio>
+          <audio controls autoplay src={playing.src} onended={() => (playing = null)} onerror={() => { playing = null; error = "Can't play audio"; }}></audio>
         {/if}
       </div>
       <div class="actions row">

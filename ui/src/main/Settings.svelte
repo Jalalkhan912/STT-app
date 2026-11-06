@@ -46,12 +46,13 @@
     const snapshot = $state.snapshot(s) as Settings;
     timer = setTimeout(async () => {
       timer = undefined;
-      lastSaved = json;
       try {
         await setSettings(snapshot);
+        lastSaved = json;
         error = "";
       } catch (e) {
         error = String(e);
+        // Leave lastSaved stale; the next edit retries the save.
       }
     }, 300);
   });
