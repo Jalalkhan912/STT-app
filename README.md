@@ -21,7 +21,7 @@ macOS needs three permissions (the first-run screen walks you through them):
 - Accessibility: to paste into the focused app.
 - Input Monitoring: for the global hotkey.
 
-With ad-hoc signing, macOS may ask for Accessibility and Input Monitoring again after each update. Remove the old Dictation entry in System Settings → Privacy & Security and add it again.
+Release builds signed with the project's self-signed certificate keep these permissions across updates. Ad-hoc signed builds (e.g. CI artifacts) don't: remove the old Dictation entry in System Settings → Privacy & Security, add it again, and restart the app (the setup screen has a Restart button).
 
 ### Troubleshooting permissions (macOS)
 - Check the microphone entitlement is in the build: `codesign -d --entitlements - /Applications/Dictation.app` should list `com.apple.security.device.audio-input`.
@@ -52,4 +52,9 @@ Manual checks: [docs/manual-test-checklist.md](docs/manual-test-checklist.md).
 
 ## Releases
 
-Pushing a tag `v*` runs `.github/workflows/release.yml`, which builds the installers and creates a draft release. Optional secrets for signing: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`. Without `APPLE_CERTIFICATE` the app is ad-hoc signed.
+Pushing a tag `v*` runs `.github/workflows/release.yml`: it runs the core tests, builds the installers and creates a draft release.
+
+macOS signing, in order of preference:
+1. **Self-signed certificate** (repo secrets `MACOS_SIGNING_P12` = base64 .p12, `MACOS_SIGNING_P12_PASSWORD`, `MACOS_SIGNING_IDENTITY` = the certificate's SHA-1 fingerprint). The identity stays the same across builds, so macOS keeps the Accessibility and Input Monitoring permissions when you update. Gatekeeper still asks for "Open Anyway" on first install.
+2. **Apple Developer ID** (secrets `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, optionally `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` for notarization).
+3. Neither: ad-hoc signed (permissions must be granted again after each update).

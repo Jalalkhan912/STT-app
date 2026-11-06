@@ -110,6 +110,7 @@ export const openPermissionSettings = (kind: PermissionKind) =>
   invoke<void>("open_permission_settings", { kind });
 export const requestPermission = (kind: PermissionKind) =>
   invoke<void>("request_permission", { kind });
+export const restartApp = () => invoke<void>("restart_app");
 
 export const onModelProgress = (cb: (p: ModelProgress) => void): Promise<UnlistenFn> =>
   listen<ModelProgress>("model-progress", (e) => cb(e.payload));

@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import {
     downloadModel, cancelDownload, getSettings, isMac, listModels, openPermissionSettings,
-    permissionStatus, requestPermission, setActiveModel, type ModelStatus, type PermissionKind,
+    permissionStatus, requestPermission, restartApp, setActiveModel, type ModelStatus, type PermissionKind,
     type PermissionStatus,
   } from "./api";
   import { ModelStore } from "./modelstate.svelte";
@@ -130,10 +130,20 @@
             {/if}
           </div>
         {/each}
-        <p class="muted small">
-          macOS may ask you to restart the app after granting Input Monitoring or Accessibility.
-        </p>
-        <div class="nav"><button class="primary" onclick={next}>{allGranted ? "Continue" : "Continue anyway"}</button></div>
+        {#if !allGranted}
+          <div class="hint small">
+            <strong>Switched it on but still "Not granted"?</strong>
+            <ol>
+              <li>In System Settings, select any old <em>Dictation</em> entry and remove it with the <strong>−</strong> button.</li>
+              <li>Click <strong>Allow…</strong> here again and switch the new entry on.</li>
+              <li>Restart Dictation — macOS applies Accessibility and Input Monitoring only after a restart.</li>
+            </ol>
+          </div>
+        {/if}
+        <div class="nav">
+          {#if !allGranted}<button onclick={() => guard(restartApp)}>Restart Dictation</button>{/if}
+          <button class="primary" onclick={next}>{allGranted ? "Continue" : "Continue anyway"}</button>
+        </div>
       {:else if step === "model"}
         <p>
           Dictation runs entirely on your computer. Download the speech model once
@@ -171,7 +181,10 @@
   .panel { width: 100%; max-width: 560px; }
   .steps { margin: -6px 0 12px; }
   .perm { padding: 10px 0; border-bottom: 1px solid var(--line); }
-  .nav { margin-top: 20px; display: flex; justify-content: flex-end; }
+  .nav { margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px; }
+  .hint { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; }
+  .hint ol { margin: 6px 0 0; padding-left: 20px; }
+  .hint li { margin: 2px 0; }
   textarea { width: 100%; resize: vertical; }
   .nowrap { white-space: nowrap; }
   .ok-text { color: var(--ok); }

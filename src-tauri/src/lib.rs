@@ -95,6 +95,7 @@ pub fn run() {
             commands::permission_status,
             commands::open_permission_settings,
             commands::request_permission,
+            commands::restart_app,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

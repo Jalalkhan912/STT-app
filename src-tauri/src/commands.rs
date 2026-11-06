@@ -382,3 +382,31 @@ pub fn open_permission_settings(kind: String) -> Result<(), String> {
 pub fn request_permission(kind: String) -> Result<(), String> {
     permissions::request(&kind)
 }
+
+/// Quits and relaunches the app, so macOS applies newly granted
+/// Accessibility / Input Monitoring permissions.
+#[tauri::command]
+pub fn restart_app(app: AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        // Relaunch through LaunchServices after this process has exited, so the
+        // single-instance plugin doesn't hand the new launch back to us.
+        let bundle = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.ancestors().nth(3).map(Path::to_path_buf))
+            .filter(|p| p.extension().is_some_and(|e| e == "app"));
+        if let Some(bundle) = bundle {
+            let spawned = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg("sleep 1; /usr/bin/open \"$0\"")
+                .arg(&bundle)
+                .spawn();
+            if spawned.is_ok() {
+                app.exit(0);
+                return;
+            }
+            log::warn!("relaunch via open failed; falling back to app.restart()");
+        }
+    }
+    app.restart();
+}
