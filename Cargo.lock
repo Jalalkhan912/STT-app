@@ -1117,6 +1117,7 @@ name = "dictation-app"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "core-foundation 0.10.1",
  "cpal",
  "dictation-core",
  "dirs 6.0.0",

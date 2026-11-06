@@ -93,6 +93,7 @@ pub fn run() {
             commands::set_active_model,
             commands::permission_status,
             commands::open_permission_settings,
+            commands::request_permission,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -159,7 +160,10 @@ pub fn run() {
             let active = state.settings_snapshot().active_model;
             let installed = dictation_core::models::find(&active)
                 .is_some_and(|m| dictation_core::models::is_installed(&paths::models_dir(), &m));
-            if !installed {
+            let perms = platform::permissions::status();
+            let perm_missing = cfg!(target_os = "macos")
+                && !(perms.microphone && perms.accessibility && perms.input_monitoring);
+            if !installed || perm_missing {
                 tray::show_main(app.handle());
             }
             Ok(())

@@ -15,11 +15,15 @@ mod mac {
     #[link(name = "ApplicationServices", kind = "framework")]
     extern "C" {
         pub fn AXIsProcessTrusted() -> bool;
+        pub fn AXIsProcessTrustedWithOptions(
+            options: core_foundation::dictionary::CFDictionaryRef,
+        ) -> bool;
     }
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
         // macOS 10.15+
         pub fn CGPreflightListenEventAccess() -> bool;
+        pub fn CGRequestListenEventAccess() -> bool;
     }
 }
 
@@ -68,6 +72,40 @@ pub fn open_settings(kind: &str) -> Result<(), String> {
             .spawn()
             .map(|_| ())
             .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = kind;
+        Ok(())
+    }
+}
+
+/// Triggers the system prompt for a permission that was never asked
+/// (no-op on Windows). The user's answer shows up in `status()`.
+pub fn request(kind: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        match kind {
+            "microphone" => super::recorder::probe_default_input(),
+            "accessibility" => {
+                use core_foundation::base::TCFType;
+                use core_foundation::boolean::CFBoolean;
+                use core_foundation::dictionary::CFDictionary;
+                use core_foundation::string::CFString;
+                // Value of kAXTrustedCheckOptionPrompt.
+                let key = CFString::new("AXTrustedCheckOptionPrompt");
+                let opts = CFDictionary::from_CFType_pairs(&[(
+                    key.as_CFType(),
+                    CFBoolean::true_value().as_CFType(),
+                )]);
+                unsafe { mac::AXIsProcessTrustedWithOptions(opts.as_concrete_TypeRef()) };
+            }
+            "input_monitoring" => {
+                unsafe { mac::CGRequestListenEventAccess() };
+            }
+            other => return Err(format!("unknown permission {other}")),
+        }
+        Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {

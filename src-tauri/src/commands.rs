@@ -341,3 +341,8 @@ pub fn permission_status() -> Result<PermissionStatus, String> {
 pub fn open_permission_settings(kind: String) -> Result<(), String> {
     permissions::open_settings(&kind)
 }
+
+#[tauri::command]
+pub fn request_permission(kind: String) -> Result<(), String> {
+    permissions::request(&kind)
+}

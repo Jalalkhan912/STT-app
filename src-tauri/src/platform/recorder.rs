@@ -228,6 +228,38 @@ where
     )
 }
 
+/// Opens the default input briefly so the OS shows its microphone prompt.
+/// Runs on a background thread (a cpal `Stream` is not `Send`).
+pub fn probe_default_input() {
+    std::thread::spawn(|| {
+        let Some(device) = cpal::default_host().default_input_device() else {
+            return;
+        };
+        let Ok(supported) = device.default_input_config() else {
+            return;
+        };
+        let config: StreamConfig = supported.config();
+        let stream = match supported.sample_format() {
+            SampleFormat::F32 => probe::<f32>(&device, &config),
+            SampleFormat::I16 => probe::<i16>(&device, &config),
+            SampleFormat::U16 => probe::<u16>(&device, &config),
+            SampleFormat::I32 => probe::<i32>(&device, &config),
+            _ => return,
+        };
+        if let Ok(stream) = stream {
+            let _ = stream.play();
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+    });
+}
+
+fn probe<T: SizedSample + Send + 'static>(
+    device: &cpal::Device,
+    config: &StreamConfig,
+) -> Result<Stream, cpal::BuildStreamError> {
+    device.build_input_stream(config, |_: &[T], _| {}, |_| {}, None)
+}
+
 /// Resamples to 16 kHz and feeds the capture buffer.
 struct Pipeline {
     shared: Arc<Shared>,
