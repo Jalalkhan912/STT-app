@@ -20,11 +20,6 @@ pub fn spawn(
     tx: Sender<Event>,
     on_pressed: impl Fn() + Send + Sync + 'static,
 ) {
-    // Only keyboard events are needed; this also keeps the macOS tap light
-    // (the rdev fork reads this variable when it builds the event mask).
-    #[cfg(target_os = "macos")]
-    std::env::set_var("KEYBOARD_ONLY", "1");
-
     let on_pressed = Arc::new(on_pressed);
     let spawned = std::thread::Builder::new()
         .name("hotkey".into())

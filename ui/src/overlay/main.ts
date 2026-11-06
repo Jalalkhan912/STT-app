@@ -1,4 +1,4 @@
 import { mount } from "svelte";
-import App from "./App.svelte";
+import Overlay from "./Overlay.svelte";
 
-export default mount(App, { target: document.getElementById("app")! });
+export default mount(Overlay, { target: document.getElementById("app")! });

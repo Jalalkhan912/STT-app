@@ -1,14 +1,15 @@
 pub mod commands;
 pub mod models_mgr;
+pub mod overlay;
 pub mod paths;
 pub mod platform;
 pub mod state;
-pub mod stubs;
 pub mod tray;
 
 use dictation_core::controller::{self, Controller};
 use dictation_core::history::History;
 use dictation_core::settings::Settings;
+use overlay::{TauriOverlay, OVERLAY_LABEL};
 use platform::hotkey_listener;
 use platform::paste::SystemPaster;
 use platform::recorder::CpalRecorder;
@@ -19,9 +20,6 @@ use std::time::Duration;
 use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
-
-/// Window label of the overlay in tauri.conf.json.
-const OVERLAY_LABEL: &str = "overlay";
 
 fn spawn_retention(state: Arc<AppState>) {
     std::thread::spawn(move || loop {
@@ -36,6 +34,12 @@ fn spawn_retention(state: Arc<AppState>) {
 }
 
 pub fn run() {
+    // Only keyboard events are needed by the hotkey listener; the rdev fork
+    // reads this when it builds the macOS event mask. Set before any thread
+    // exists: mutating the environment later races with other threads.
+    #[cfg(target_os = "macos")]
+    std::env::set_var("KEYBOARD_ONLY", "1");
+
     let data_dir = paths::data_dir();
     let settings = Settings::load(&paths::settings_path());
     let history = match History::open(&data_dir) {
@@ -46,7 +50,10 @@ pub fn run() {
         }
     };
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+    builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main(app);
         }))
@@ -138,13 +145,14 @@ pub fn run() {
                 Box::new(recorder),
                 state.speech.clone(),
                 Box::new(SystemPaster::new()),
-                Box::new(stubs::StubOverlay),
+                Box::new(TauriOverlay::new(app.handle().clone(), state.clone())),
                 state.history.clone(),
                 state.ctrl_config.clone(),
                 Box::new(now_ms),
             );
             std::thread::spawn(move || controller::run(ctrl, rx));
 
+            overlay::setup(app.handle())?;
             tray::setup(app.handle())?;
 
             // First run (no model yet): open the main window for setup.
