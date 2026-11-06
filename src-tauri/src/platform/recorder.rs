@@ -5,7 +5,7 @@
 //! thread over a channel. The stream callback downmixes to mono, resamples to
 //! 16 kHz and pushes into a shared `CaptureBuffer`.
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, SampleFormat, SizedSample, Stream, StreamConfig};
+use cpal::{FromSample, Sample, SampleFormat, SizedSample, Stream, StreamConfig};
 use dictation_core::capture::{rms, CaptureBuffer, PushResult, SAMPLE_RATE};
 use dictation_core::controller::Recorder;
 use dictation_core::events::Event;
@@ -255,27 +255,30 @@ impl Pipeline {
     }
 
     fn feed(&mut self, mono: &[f32]) {
-        let Some(r) = self.resampler.as_mut() else {
-            self.push(mono);
-            return;
-        };
-        self.pending.extend_from_slice(mono);
-        loop {
-            let need = r.input_frames_next();
-            if self.pending.len() < need {
-                break;
-            }
-            let chunk: Vec<f32> = self.pending.drain(..need).collect();
-            match r.process(&[chunk], None) {
-                Ok(mut out) => {
-                    let out = out.remove(0);
-                    self.push(&out);
-                }
-                Err(e) => {
-                    log::warn!("resample failed: {e}");
+        let mut outs: Vec<Vec<f32>> = Vec::new();
+        {
+            let Some(r) = self.resampler.as_mut() else {
+                self.push(mono);
+                return;
+            };
+            self.pending.extend_from_slice(mono);
+            loop {
+                let need = r.input_frames_next();
+                if self.pending.len() < need {
                     break;
                 }
+                let chunk: Vec<f32> = self.pending.drain(..need).collect();
+                match r.process(&[chunk], None) {
+                    Ok(mut out) => outs.push(out.remove(0)),
+                    Err(e) => {
+                        log::warn!("resample failed: {e}");
+                        break;
+                    }
+                }
             }
+        }
+        for out in outs {
+            self.push(&out);
         }
     }
 
