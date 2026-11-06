@@ -10,7 +10,7 @@ use dictation_core::settings::OverlayPosition;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Window label of the overlay in tauri.conf.json.
 pub const OVERLAY_LABEL: &str = "overlay";
@@ -49,9 +49,17 @@ pub fn compute_position(
 pub struct TauriOverlay {
     app: AppHandle,
     state: Arc<AppState>,
-    /// Bumped on every `set`; a pending hide only fires if it still matches.
+    /// Bumped on every `set` (controller thread). Main-thread closures compare
+    /// against it, so a stale hide can never run after a newer state: all
+    /// window changes execute serially on the main thread and each one
+    /// re-reads the generation there.
     generation: Arc<AtomicU64>,
+    /// Only touched on the main thread.
     visible: Arc<AtomicBool>,
+}
+
+fn emit_state(app: &AppHandle, s: &OverlayState) {
+    let _ = app.emit_to(OVERLAY_LABEL, "overlay-state", s);
 }
 
 impl TauriOverlay {
@@ -64,46 +72,36 @@ impl TauriOverlay {
         }
     }
 
-    fn show(&self, reposition: bool) {
-        let app = self.app.clone();
-        let position = self.state.settings_snapshot().overlay_position;
-        let visible = self.visible.clone();
-        let res = self.app.run_on_main_thread(move || {
-            if reposition || !visible.load(Ordering::SeqCst) {
-                place(&app, &position);
-            }
-            platform_show(&app);
-            visible.store(true, Ordering::SeqCst);
-        });
-        if let Err(e) = res {
-            log::warn!("overlay show failed: {e}");
+    /// Runs `f` on the main thread.
+    fn on_main(&self, f: impl FnOnce() + Send + 'static) {
+        if let Err(e) = self.app.run_on_main_thread(f) {
+            log::warn!("overlay: main-thread dispatch failed: {e}");
         }
     }
 
-    fn hide_now(app: &AppHandle, visible: &AtomicBool) {
-        visible.store(false, Ordering::SeqCst);
-        let app2 = app.clone();
-        if let Err(e) = app.run_on_main_thread(move || platform_hide(&app2)) {
-            log::warn!("overlay hide failed: {e}");
-        }
-    }
-
-    /// Hide after `delay`, unless a newer state arrives first.
+    /// Two-step hide after `delay` unless a newer state arrives: emit
+    /// `hidden` (CSS fade-out, rAF loop stops), then hide the window. Each
+    /// step re-checks the generation on the main thread.
     fn hide_after(&self, delay: Duration, generation: u64) {
         let app = self.app.clone();
         let gen_counter = self.generation.clone();
         let visible = self.visible.clone();
         std::thread::spawn(move || {
             std::thread::sleep(delay);
-            if gen_counter.load(Ordering::SeqCst) != generation {
-                return;
-            }
-            // Let the webview fade out and stop its animation loop first.
-            let _ = app.emit_to(OVERLAY_LABEL, "overlay-state", OverlayState::Hidden);
+            let (a, g) = (app.clone(), gen_counter.clone());
+            let _ = app.run_on_main_thread(move || {
+                if g.load(Ordering::SeqCst) == generation {
+                    emit_state(&a, &OverlayState::Hidden);
+                }
+            });
             std::thread::sleep(FADE_OUT);
-            if gen_counter.load(Ordering::SeqCst) == generation {
-                Self::hide_now(&app, &visible);
-            }
+            let (a, g) = (app.clone(), gen_counter);
+            let _ = app.run_on_main_thread(move || {
+                if g.load(Ordering::SeqCst) == generation {
+                    visible.store(false, Ordering::SeqCst);
+                    platform_hide(&a);
+                }
+            });
         });
     }
 }
@@ -111,36 +109,42 @@ impl TauriOverlay {
 impl Overlay for TauriOverlay {
     fn set(&self, s: OverlayState) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let position = self.state.settings_snapshot().overlay_position;
+        let app = self.app.clone();
+        let visible = self.visible.clone();
+        let gen_counter = self.generation.clone();
         let delay = match &s {
-            OverlayState::Hidden => {
-                let _ = self
-                    .app
-                    .emit_to(OVERLAY_LABEL, "overlay-state", OverlayState::Hidden);
-                Self::hide_now(&self.app, &self.visible);
-                return;
-            }
-            OverlayState::Recording => {
-                self.show(true);
-                None
-            }
-            OverlayState::Processing => {
-                self.show(false);
-                None
-            }
-            OverlayState::Done => {
-                self.show(false);
-                Some(Duration::from_millis(700))
-            }
+            OverlayState::Hidden => None,
+            OverlayState::Done => Some(Duration::from_millis(700)),
             OverlayState::NoSpeech
             | OverlayState::Copied
             | OverlayState::MicError(_)
             | OverlayState::NoModel
-            | OverlayState::Error(_) => {
-                self.show(false);
-                Some(Duration::from_millis(1800))
-            }
+            | OverlayState::Error(_) => Some(Duration::from_millis(1800)),
+            OverlayState::Recording | OverlayState::Processing => None,
         };
-        let _ = self.app.emit_to(OVERLAY_LABEL, "overlay-state", &s);
+        self.on_main(move || {
+            // A newer state is already queued behind us; let it win.
+            if gen_counter.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            match &s {
+                OverlayState::Hidden => {
+                    emit_state(&app, &s);
+                    visible.store(false, Ordering::SeqCst);
+                    platform_hide(&app);
+                }
+                _ => {
+                    let reposition = matches!(s, OverlayState::Recording);
+                    if reposition || !visible.load(Ordering::SeqCst) {
+                        place(&app, &position);
+                    }
+                    platform_show(&app);
+                    visible.store(true, Ordering::SeqCst);
+                    emit_state(&app, &s);
+                }
+            }
+        });
         if let Some(d) = delay {
             self.hide_after(d, generation);
         }
@@ -173,7 +177,17 @@ fn place(app: &AppHandle, pos: &OverlayPosition) {
     let wa = monitor.work_area();
     let area = (wa.position.x, wa.position.y, wa.size.width, wa.size.height);
     let (x, y) = compute_position(area, monitor.scale_factor(), pos);
-    if let Err(e) = window.set_position(PhysicalPosition::new(x, y)) {
+    // macOS: tao converts a physical position with the window's *current*
+    // monitor scale, which is wrong when moving across mixed-DPI monitors.
+    // Convert with the target monitor's scale ourselves and pass logical.
+    #[cfg(target_os = "macos")]
+    let target = {
+        let sf = monitor.scale_factor();
+        tauri::LogicalPosition::new(x as f64 / sf, y as f64 / sf)
+    };
+    #[cfg(not(target_os = "macos"))]
+    let target = tauri::PhysicalPosition::new(x, y);
+    if let Err(e) = window.set_position(target) {
         log::warn!("overlay set_position failed: {e}");
     }
 }

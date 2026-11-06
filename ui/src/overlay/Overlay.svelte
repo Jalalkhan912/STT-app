@@ -15,16 +15,24 @@
   };
 
   let ov: OverlayPayload = $state({ kind: "hidden" });
+  // Content to render: the last non-hidden state, so the fade-out shows it.
+  let shown: OverlayPayload = $state({ kind: "hidden" });
   let canvas: HTMLCanvasElement | undefined = $state();
   let target = 0;
   let reduced = $state(false);
   let dotOpacity = $state(0.3);
+  let barColor = "#fff";
 
   const recording = $derived(ov.kind === "recording");
   const visible = $derived(ov.kind !== "hidden");
-  const text = $derived(messages[ov.kind]);
+  const showRecording = $derived(shown.kind === "recording");
+  const text = $derived(messages[shown.kind]);
 
-  // Animation loop: runs only while recording.
+  function refreshColor() {
+    if (canvas) barColor = getComputedStyle(canvas).color;
+  }
+
+  // Animation loop: runs only while recording (and not reduced-motion).
   let raf = 0;
   let bars: number[] = Array(BAR_COUNT).fill(MIN_BAR);
   function stop() {
@@ -37,15 +45,16 @@
     let last = performance.now();
     let n = 0;
     const frame = (now: number) => {
+      // Schedule first so an exception in draw cannot kill the loop.
+      raf = requestAnimationFrame(frame);
       const dt = Math.min(100, now - last);
       last = now;
-      if (reduced) {
-        dotOpacity = 0.3 + 0.7 * target;
-      } else {
-        bars = step(bars, target, dt, n++);
+      bars = step(bars, target, dt, n++);
+      try {
         draw();
+      } catch (e) {
+        console.warn("overlay draw failed", e);
       }
-      raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
   }
@@ -54,13 +63,15 @@
     if (!canvas || !ctx) return;
     const dpr = window.devicePixelRatio || 1;
     const w = 56, h = 20;
-    if (canvas.width !== w * dpr) {
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
+    const pw = Math.round(w * dpr), ph = Math.round(h * dpr);
+    if (canvas.width !== pw || canvas.height !== ph) {
+      canvas.width = pw;
+      canvas.height = ph;
+      refreshColor();
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = getComputedStyle(canvas).color;
+    ctx.fillStyle = barColor;
     const bw = 4, gap = 2.5;
     bars.forEach((v, i) => {
       const bh = Math.max(2, v * h);
@@ -73,7 +84,11 @@
   $effect(() => {
     if (recording) {
       target = 0;
-      start();
+      dotOpacity = 0.3;
+      if (!reduced) {
+        refreshColor();
+        start();
+      }
     } else {
       stop();
     }
@@ -85,28 +100,38 @@
     reduced = mq.matches;
     const onMq = (e: MediaQueryListEvent) => (reduced = e.matches);
     mq.addEventListener("change", onMq);
+    const scheme = window.matchMedia("(prefers-color-scheme: dark)");
+    scheme.addEventListener("change", refreshColor);
     const unlisten = [
-      listen<OverlayPayload>("overlay-state", (e) => (ov = e.payload)),
-      listen<number>("audio-level", (e) => (target = level(e.payload))),
+      listen<OverlayPayload>("overlay-state", (e) => {
+        ov = e.payload;
+        if (e.payload.kind !== "hidden") shown = e.payload;
+      }),
+      listen<number>("audio-level", (e) => {
+        target = level(e.payload);
+        // Reduced motion: no rAF loop, the dot follows the level directly.
+        if (reduced) dotOpacity = 0.3 + 0.7 * target;
+      }),
     ];
     return () => {
       mq.removeEventListener("change", onMq);
+      scheme.removeEventListener("change", refreshColor);
       unlisten.forEach((p) => p.then((f) => f()));
     };
   });
 </script>
 
 <div class="pill" class:visible>
-  {#if recording}
-    <span class="rec"></span>
+  {#if showRecording}
     {#if reduced}
-      <span class="level" style:opacity={dotOpacity}></span>
+      <span class="rec" style:opacity={dotOpacity}></span>
     {:else}
+      <span class="rec"></span>
       <canvas bind:this={canvas} style="width:56px;height:20px"></canvas>
     {/if}
-  {:else if ov.kind === "processing"}
+  {:else if shown.kind === "processing"}
     <span class="dots"><i></i><i></i><i></i></span>
-  {:else if ov.kind === "done"}
+  {:else if shown.kind === "done"}
     <span class="check">✓</span>
   {:else if text}
     <span class="msg">{text}</span>
@@ -158,12 +183,6 @@
     border-radius: 50%;
     background: #ff3b30;
     flex: none;
-  }
-  .level {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--pill-fg);
   }
   canvas {
     color: var(--pill-fg);
