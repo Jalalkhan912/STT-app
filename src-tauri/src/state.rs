@@ -1,7 +1,7 @@
 use dictation_core::controller::{ControllerConfig, SharedSpeech};
 use dictation_core::events::Event;
 use dictation_core::history::History;
-use dictation_core::settings::Settings;
+use dictation_core::settings::{HotkeySpec, Settings};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -28,6 +28,8 @@ pub struct AppState {
     pub last_used_ms: AtomicI64,
     /// Path of the bundled Silero VAD model.
     pub vad_path: PathBuf,
+    /// Live hotkey for the listener; every settings change writes it.
+    pub hotkey: Arc<RwLock<HotkeySpec>>,
     /// Serialises model loads so two loaders never race to swap.
     pub load_lock: Mutex<()>,
 }
@@ -44,6 +46,7 @@ impl AppState {
             retention: settings.audio_retention.clone(),
         };
         AppState {
+            hotkey: Arc::new(RwLock::new(settings.hotkey.clone())),
             settings: RwLock::new(settings),
             history,
             speech: Arc::new(Mutex::new(None)),
@@ -61,6 +64,10 @@ impl AppState {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    pub fn set_hotkey(&self, spec: &HotkeySpec) {
+        *self.hotkey.write().unwrap_or_else(|e| e.into_inner()) = spec.clone();
     }
 
     /// Record activity for the idle-unload timer.

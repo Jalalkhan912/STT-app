@@ -1,3 +1,4 @@
+use crate::platform::permissions::{self, PermissionStatus};
 use crate::state::{now_ms, AppState};
 use crate::{models_mgr, paths};
 use dictation_core::cleanup::clean;
@@ -46,6 +47,7 @@ pub fn set_settings(app: AppHandle, state: S, s: Settings) -> Result<(), String>
         cfg.cleanup = s.cleanup.clone();
         cfg.retention = s.audio_retention.clone();
     }
+    state.set_hotkey(&s.hotkey);
     let old = {
         let mut cur = state.settings.write().unwrap_or_else(|e| e.into_inner());
         std::mem::replace(&mut *cur, s.clone())
@@ -64,15 +66,15 @@ pub fn set_settings(app: AppHandle, state: S, s: Settings) -> Result<(), String>
             log::warn!("retention failed: {e}");
         }
     }
-    // The hotkey listener (Task 11) subscribes to this to pick up a new spec.
+    // The hotkey listener reads `state.hotkey`, written above. Changes to the
+    // input device or always-on mic apply after an app restart (v1).
     let _ = app.emit("settings-changed", &s);
     Ok(())
 }
 
 #[tauri::command]
 pub fn list_input_devices() -> Result<Vec<String>, String> {
-    // Task 11 provides device enumeration with the real recorder.
-    Ok(Vec::new())
+    Ok(crate::platform::recorder::list_input_devices())
 }
 
 // ---- history ----
@@ -330,24 +332,12 @@ pub fn set_active_model(app: AppHandle, state: S, id: String) -> Result<(), Stri
 
 // ---- permissions ----
 
-#[derive(Serialize)]
-pub struct Permissions {
-    pub microphone: bool,
-    pub accessibility: bool,
-}
-
 #[tauri::command]
-pub fn permissions_status() -> Result<Permissions, String> {
-    // Task 11 provides the real checks.
-    Ok(Permissions {
-        microphone: true,
-        accessibility: true,
-    })
+pub fn permission_status() -> Result<PermissionStatus, String> {
+    Ok(permissions::status())
 }
 
 #[tauri::command]
 pub fn open_permission_settings(kind: String) -> Result<(), String> {
-    // Task 11 provides the real implementation.
-    log::info!("open_permission_settings({kind}) not implemented yet");
-    Ok(())
+    permissions::open_settings(&kind)
 }

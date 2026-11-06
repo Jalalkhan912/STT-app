@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod models_mgr;
 pub mod paths;
+pub mod platform;
 pub mod state;
 pub mod stubs;
 pub mod tray;
@@ -8,13 +9,19 @@ pub mod tray;
 use dictation_core::controller::{self, Controller};
 use dictation_core::history::History;
 use dictation_core::settings::Settings;
+use platform::hotkey_listener;
+use platform::paste::SystemPaster;
+use platform::recorder::CpalRecorder;
 use state::{now_ms, AppState};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{Manager, WindowEvent};
+use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
+
+/// Window label of the overlay in tauri.conf.json.
+const OVERLAY_LABEL: &str = "overlay";
 
 fn spawn_retention(state: Arc<AppState>) {
     std::thread::spawn(move || loop {
@@ -77,7 +84,7 @@ pub fn run() {
             commands::cancel_download,
             commands::import_model,
             commands::set_active_model,
-            commands::permissions_status,
+            commands::permission_status,
             commands::open_permission_settings,
         ])
         .on_window_event(|window, event| {
@@ -105,10 +112,32 @@ pub fn run() {
             models_mgr::spawn_load(state.clone());
             models_mgr::spawn_idle_unloader(state.clone());
 
+            let boot = state.settings_snapshot();
+            let overlay_app = app.handle().clone();
+            let recorder = CpalRecorder::new(
+                boot.input_device.clone(),
+                boot.mic_always_on,
+                Box::new(move |level| {
+                    let _ = overlay_app.emit_to(OVERLAY_LABEL, "audio-level", level);
+                }),
+                state.events.clone(),
+            );
+            let press_state = state.clone();
+            hotkey_listener::spawn(state.hotkey.clone(), state.events.clone(), move || {
+                // Runs on the OS hook thread: no blocking work here.
+                press_state.touch();
+                let unloaded =
+                    matches!(press_state.speech.try_lock(), Ok(guard) if guard.is_none());
+                if unloaded {
+                    let st = press_state.clone();
+                    std::thread::spawn(move || models_mgr::ensure_loaded(&st));
+                }
+            });
+
             let ctrl = Controller::new(
-                Box::new(stubs::StubRecorder),
+                Box::new(recorder),
                 state.speech.clone(),
-                Box::new(stubs::StubPaster),
+                Box::new(SystemPaster::new()),
                 Box::new(stubs::StubOverlay),
                 state.history.clone(),
                 state.ctrl_config.clone(),
