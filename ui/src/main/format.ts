@@ -54,7 +54,10 @@ export function formatDuration(ms: number): string {
 }
 
 /** Codes the Rust hotkey listener can report (see platform/keymap.rs). */
-export function isSupportedKey(code: string): boolean {
+export function isSupportedKey(code: string, mac = false): boolean {
+  // macOS only reports CapsLock as a toggle (no key-up while it stays on), so a
+  // hold-to-talk hotkey on it would get stuck.
+  if (mac && code === "CapsLock") return false;
   return /^(Key[A-Z]|Digit[0-9]|F([1-9]|1[0-2])|(Alt|Control|Shift|Meta)(Left|Right)|Space|Escape|Tab|CapsLock|Arrow(Left|Right|Up|Down))$/.test(
     code,
   );

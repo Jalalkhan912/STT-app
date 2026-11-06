@@ -86,6 +86,7 @@ pub fn run() {
             commands::audio_file,
             commands::export_history,
             commands::storage_usage,
+            commands::model_state,
             commands::list_models,
             commands::download_model,
             commands::cancel_download,
@@ -113,6 +114,7 @@ pub fn run() {
                 .unwrap_or_else(|_| "resources/silero_vad_v4.onnx".into());
             let (tx, rx) = mpsc::channel();
             let state = Arc::new(AppState::new(settings, history, tx, vad_path));
+            let _ = state.app.set(app.handle().clone());
             app.manage(state.clone());
 
             commands::apply_autostart(app.handle(), state.settings_snapshot().launch_at_login);
@@ -137,12 +139,21 @@ pub fn run() {
                 let unloaded =
                     matches!(press_state.speech.try_lock(), Ok(guard) if guard.is_none());
                 if unloaded {
+                    // Flag the load before the controller sees this press, so
+                    // the overlay says "Loading model…" rather than "No model".
+                    let root = paths::models_dir();
+                    let id = press_state.settings_snapshot().active_model;
+                    if dictation_core::models::find(&id)
+                        .is_some_and(|m| dictation_core::models::is_installed(&root, &m))
+                    {
+                        press_state.set_model_state(state::ModelState::Loading);
+                    }
                     let st = press_state.clone();
                     std::thread::spawn(move || models_mgr::ensure_loaded(&st));
                 }
             });
 
-            let ctrl = Controller::new(
+            let mut ctrl = Controller::new(
                 Box::new(recorder),
                 state.speech.clone(),
                 Box::new(SystemPaster::new()),
@@ -151,6 +162,10 @@ pub fn run() {
                 state.ctrl_config.clone(),
                 Box::new(now_ms),
             );
+            let history_app = app.handle().clone();
+            ctrl.set_on_saved(Box::new(move || {
+                let _ = history_app.emit("history-changed", ());
+            }));
             std::thread::spawn(move || controller::run(ctrl, rx));
 
             overlay::setup(app.handle())?;

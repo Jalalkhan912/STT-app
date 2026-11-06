@@ -61,6 +61,14 @@ impl Paster for SystemPaster {
         focus::frontmost_app()
     }
 
+    fn copy_only(&mut self, text: &str) {
+        // Focus moved since the key press: leave the text on the clipboard
+        // (no restore) for the user to paste where they want.
+        if let Ok(mut clipboard) = Clipboard::new() {
+            let _ = clipboard.set_text(text.to_string());
+        }
+    }
+
     fn paste(&mut self, text: &str) -> PasteOutcome {
         let Ok(mut clipboard) = Clipboard::new() else {
             return PasteOutcome::CopiedOnly;

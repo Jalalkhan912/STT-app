@@ -28,19 +28,50 @@ mod mac {
 }
 
 #[cfg(target_os = "macos")]
-pub fn status() -> PermissionStatus {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MicAuth {
+    NotDetermined,
+    Denied,
+    Authorized,
+}
+
+/// Current AVCaptureDevice authorization for audio.
+#[cfg(target_os = "macos")]
+pub fn mic_auth() -> MicAuth {
     use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
-    let microphone = unsafe {
-        match AVMediaTypeAudio {
-            Some(kind) => {
-                AVCaptureDevice::authorizationStatusForMediaType(kind)
-                    == AVAuthorizationStatus::Authorized
-            }
-            None => false,
-        }
+    let Some(kind) = (unsafe { AVMediaTypeAudio }) else {
+        return MicAuth::Denied;
     };
+    let status = unsafe { AVCaptureDevice::authorizationStatusForMediaType(kind) };
+    if status == AVAuthorizationStatus::Authorized {
+        MicAuth::Authorized
+    } else if status == AVAuthorizationStatus::NotDetermined {
+        MicAuth::NotDetermined
+    } else {
+        // Denied or Restricted.
+        MicAuth::Denied
+    }
+}
+
+/// Asks macOS to show the microphone prompt (only ever shown once per app;
+/// afterwards the answer is fixed until changed in System Settings). The
+/// user's answer shows up in `status()`.
+#[cfg(target_os = "macos")]
+pub fn request_mic_access() {
+    use block2::RcBlock;
+    use objc2::runtime::Bool;
+    use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio};
+    let Some(kind) = (unsafe { AVMediaTypeAudio }) else {
+        return;
+    };
+    let handler = RcBlock::new(|_granted: Bool| {});
+    unsafe { AVCaptureDevice::requestAccessForMediaType_completionHandler(kind, &handler) };
+}
+
+#[cfg(target_os = "macos")]
+pub fn status() -> PermissionStatus {
     PermissionStatus {
-        microphone,
+        microphone: mic_auth() == MicAuth::Authorized,
         accessibility: unsafe { mac::AXIsProcessTrusted() },
         input_monitoring: unsafe { mac::CGPreflightListenEventAccess() },
     }
@@ -86,7 +117,7 @@ pub fn request(kind: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         match kind {
-            "microphone" => super::recorder::probe_default_input(),
+            "microphone" => request_mic_access(),
             "accessibility" => {
                 use core_foundation::base::TCFType;
                 use core_foundation::boolean::CFBoolean;

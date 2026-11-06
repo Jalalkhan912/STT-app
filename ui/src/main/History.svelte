@@ -3,7 +3,8 @@
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { save } from "@tauri-apps/plugin-dialog";
   import {
-    audioFile, deleteDictation, exportHistory, listHistory, retranscribe, searchHistory,
+    audioFile, deleteDictation, exportHistory, listHistory, onHistoryChanged, retranscribe,
+    searchHistory,
     type Dictation,
   } from "./api";
   import { formatDuration, groupByDay } from "./format";
@@ -64,7 +65,12 @@
   }
   onMount(() => {
     load(true);
-    return () => clearTimeout(timer);
+    // A new dictation was saved: reload the first page, keeping the search query.
+    const un = onHistoryChanged(() => load(true));
+    return () => {
+      clearTimeout(timer);
+      un.then((f) => f());
+    };
   });
 
   const time = (ms: number) =>

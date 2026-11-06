@@ -75,6 +75,12 @@ export interface ModelDone {
   error: string | null;
 }
 
+export type ModelState =
+  | { kind: "none" }
+  | { kind: "loading" }
+  | { kind: "ready" }
+  | { kind: "error"; message: string };
+
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (s: Settings) => invoke<void>("set_settings", { s });
 export const listInputDevices = () => invoke<string[]>("list_input_devices");
@@ -97,6 +103,8 @@ export const importModel = (id: string, fileName: string, path: string) =>
   invoke<void>("import_model", { id, fileName, path });
 export const setActiveModel = (id: string) => invoke<void>("set_active_model", { id });
 
+export const modelState = () => invoke<ModelState>("model_state");
+
 export const permissionStatus = () => invoke<PermissionStatus>("permission_status");
 export const openPermissionSettings = (kind: PermissionKind) =>
   invoke<void>("open_permission_settings", { kind });
@@ -109,6 +117,11 @@ export const onModelDone = (cb: (p: ModelDone) => void): Promise<UnlistenFn> =>
   listen<ModelDone>("model-done", (e) => cb(e.payload));
 export const onSettingsChanged = (cb: (s: Settings) => void): Promise<UnlistenFn> =>
   listen<Settings>("settings-changed", (e) => cb(e.payload));
+
+export const onModelState = (cb: (s: ModelState) => void): Promise<UnlistenFn> =>
+  listen<ModelState>("model-state", (e) => cb(e.payload));
+export const onHistoryChanged = (cb: () => void): Promise<UnlistenFn> =>
+  listen<null>("history-changed", () => cb());
 
 export const isMac = /Mac/i.test(
   typeof navigator === "undefined" ? "" : navigator.platform || navigator.userAgent,

@@ -98,6 +98,19 @@ impl CpalRecorder {
 
 impl Recorder for CpalRecorder {
     fn start(&mut self) -> Result<(), String> {
+        // Without permission macOS delivers silence, which would show up as
+        // "No speech". Fail loudly instead.
+        #[cfg(target_os = "macos")]
+        match super::permissions::mic_auth() {
+            super::permissions::MicAuth::Authorized => {}
+            super::permissions::MicAuth::Denied => {
+                return Err("Microphone access denied".into());
+            }
+            super::permissions::MicAuth::NotDetermined => {
+                super::permissions::request_mic_access();
+                return Err("Allow microphone access, then try again".into());
+            }
+        }
         // A stream that errored (e.g. unplugged) is rebuilt from scratch.
         if self.shared.err.swap(false, Ordering::SeqCst) && self.open {
             self.close_stream();

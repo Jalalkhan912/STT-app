@@ -9,10 +9,18 @@
   const messages: Record<string, string> = {
     no_speech: "No speech",
     copied: isMac ? "Copied — press ⌘V" : "Copied — press Ctrl+V",
-    mic_error: "Mic error",
     no_model: "No model",
+    loading: "Loading model…",
     error: "Error",
   };
+
+  // The pill is 120 px wide, so map the backend's sentences to short labels;
+  // anything else is cut with an ellipsis by the CSS.
+  function micText(message?: string): string {
+    if (message?.includes("denied")) return "Mic access denied";
+    if (message?.startsWith("Allow")) return "Allow mic, retry";
+    return "Mic error";
+  }
 
   let ov: OverlayPayload = $state({ kind: "hidden" });
   // Content to render: the last non-hidden state, so the fade-out shows it.
@@ -26,7 +34,9 @@
   const recording = $derived(ov.kind === "recording");
   const visible = $derived(ov.kind !== "hidden");
   const showRecording = $derived(shown.kind === "recording");
-  const text = $derived(messages[shown.kind]);
+  const text = $derived(
+    shown.kind === "mic_error" ? micText(shown.message) : messages[shown.kind],
+  );
 
   function refreshColor() {
     if (canvas) barColor = getComputedStyle(canvas).color;
@@ -192,6 +202,9 @@
   }
   .msg {
     font-size: 11px;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .dots {
     display: flex;

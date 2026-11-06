@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { confirm } from "@tauri-apps/plugin-dialog";
   import {
     getSettings, isMac, listInputDevices, onSettingsChanged, setSettings, storageUsage,
     type OverlayPosition, type Retention, type Settings,
@@ -14,6 +15,24 @@
   let error = $state("");
   let lastSaved = "";
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // The edit waiting for the debounce timer; flushed on destroy.
+  let pending: { snapshot: Settings; json: string } | null = null;
+
+  async function flush() {
+    clearTimeout(timer);
+    timer = undefined;
+    const p = pending;
+    pending = null;
+    if (!p) return;
+    try {
+      await setSettings(p.snapshot);
+      lastSaved = p.json;
+      error = "";
+    } catch (e) {
+      error = String(e);
+      // Leave lastSaved stale; the next edit retries the save.
+    }
+  }
 
   const nl = (v: string) => v.replaceAll("\n", "\\n");
   const unnl = (v: string) => v.replaceAll("\\n", "\n");
@@ -33,7 +52,8 @@
     });
     return () => {
       un.then((f) => f());
-      clearTimeout(timer);
+      // Save what was typed in the last 300 ms instead of dropping it.
+      void flush();
     };
   });
 
@@ -41,32 +61,55 @@
   $effect(() => {
     if (!s) return;
     const json = JSON.stringify(s);
-    if (json === lastSaved) return;
     clearTimeout(timer);
-    const snapshot = $state.snapshot(s) as Settings;
-    timer = setTimeout(async () => {
+    if (json === lastSaved) {
+      // Edited back to the saved value within the debounce window.
+      pending = null;
       timer = undefined;
-      try {
-        await setSettings(snapshot);
-        lastSaved = json;
-        error = "";
-      } catch (e) {
-        error = String(e);
-        // Leave lastSaved stale; the next edit retries the save.
-      }
-    }, 300);
+      return;
+    }
+    pending = { snapshot: $state.snapshot(s) as Settings, json };
+    timer = setTimeout(flush, 300);
   });
 
   const retMode = $derived(
     !s ? "Forever" : typeof s.audio_retention === "string" ? s.audio_retention : "Days",
   );
   const retDays = $derived(s && typeof s.audio_retention === "object" ? s.audio_retention.Days : 30);
-  function setRetMode(m: string) {
-    if (!s) return;
-    s.audio_retention = (m === "Days" ? { Days: retDays } : m) as Retention;
+  /** True when switching to `next` deletes recordings that `cur` keeps. */
+  function deletesMore(cur: Retention, next: Retention): boolean {
+    if (cur === "Never") return false;
+    if (next === "Never") return true;
+    if (typeof next === "string") return false; // Forever
+    return cur === "Forever" || (typeof cur === "object" && next.Days < cur.Days);
   }
-  function setRetDays(n: number) {
-    if (s && n >= 1) s.audio_retention = { Days: Math.floor(n) };
+  /** Applies a retention change, asking first if it deletes audio right away. */
+  async function changeRetention(next: Retention): Promise<boolean> {
+    if (!s) return false;
+    if (deletesMore(s.audio_retention, next)) {
+      let ok = false;
+      try {
+        ok = await confirm("This deletes older recordings now. Continue?", {
+          title: "Delete recordings?",
+          kind: "warning",
+        });
+      } catch {
+        ok = false;
+      }
+      if (!ok) return false;
+    }
+    if (s) s.audio_retention = next;
+    return true;
+  }
+  async function setRetMode(el: HTMLSelectElement) {
+    const m = el.value;
+    if (!(await changeRetention((m === "Days" ? { Days: retDays } : m) as Retention))) {
+      el.value = retMode; // declined: show the unchanged choice again
+    }
+  }
+  async function setRetDays(el: HTMLInputElement) {
+    const n = el.valueAsNumber;
+    if (!(n >= 1) || !(await changeRetention({ Days: Math.floor(n) }))) el.value = String(retDays);
   }
 
   const positions: [OverlayPosition, string][] = [
@@ -174,14 +217,14 @@
     <div class="field">
       <label for="ret">Keep audio</label>
       <div class="row">
-        <select id="ret" value={retMode} onchange={(e) => setRetMode(e.currentTarget.value)}>
+        <select id="ret" value={retMode} onchange={(e) => setRetMode(e.currentTarget)}>
           <option value="Forever">Forever</option>
           <option value="Days">For a number of days</option>
           <option value="Never">Never</option>
         </select>
         {#if retMode === "Days"}
           <input type="number" min="1" style="width:70px" value={retDays}
-            onchange={(e) => setRetDays(e.currentTarget.valueAsNumber)} />
+            onchange={(e) => setRetDays(e.currentTarget)} />
           <span class="small muted">days</span>
         {/if}
       </div>

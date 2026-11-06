@@ -1,5 +1,5 @@
 use crate::platform::permissions::{self, PermissionStatus};
-use crate::state::{now_ms, AppState};
+use crate::state::{now_ms, AppState, ModelState};
 use crate::{models_mgr, paths};
 use dictation_core::cleanup::clean;
 use dictation_core::history::{Dictation, Status};
@@ -39,7 +39,20 @@ pub fn get_settings(state: S) -> Result<Settings, String> {
 }
 
 #[tauri::command]
-pub fn set_settings(app: AppHandle, state: S, s: Settings) -> Result<(), String> {
+pub async fn set_settings(app: AppHandle, state: S<'_>, s: Settings) -> Result<(), String> {
+    // Retention deletes files and saving hits the disk; keep both off the main
+    // run loop, which hosts the macOS event tap.
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || set_settings_blocking(&app, &st, s))
+        .await
+        .map_err(err)?
+}
+
+fn set_settings_blocking(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    s: Settings,
+) -> Result<(), String> {
     std::fs::create_dir_all(paths::data_dir()).map_err(err)?;
     s.save(&paths::settings_path()).map_err(err)?;
     {
@@ -53,10 +66,10 @@ pub fn set_settings(app: AppHandle, state: S, s: Settings) -> Result<(), String>
         std::mem::replace(&mut *cur, s.clone())
     };
     if old.active_model != s.active_model {
-        models_mgr::spawn_load(state.inner().clone());
+        models_mgr::spawn_load(state.clone());
     }
     if old.launch_at_login != s.launch_at_login {
-        apply_autostart(&app, s.launch_at_login);
+        apply_autostart(app, s.launch_at_login);
     }
     if old.audio_retention != s.audio_retention {
         if let Err(e) = state
@@ -73,24 +86,39 @@ pub fn set_settings(app: AppHandle, state: S, s: Settings) -> Result<(), String>
 }
 
 #[tauri::command]
-pub fn list_input_devices() -> Result<Vec<String>, String> {
-    Ok(crate::platform::recorder::list_input_devices())
+pub async fn list_input_devices() -> Result<Vec<String>, String> {
+    // CoreAudio enumeration can take a while; not on the main run loop.
+    tauri::async_runtime::spawn_blocking(crate::platform::recorder::list_input_devices)
+        .await
+        .map_err(err)
 }
 
 // ---- history ----
 
 #[tauri::command]
-pub fn list_history(
-    state: S,
+pub async fn list_history(
+    state: S<'_>,
     before_id: Option<String>,
     limit: u32,
 ) -> Result<Vec<Dictation>, String> {
-    state.history.list(before_id.as_deref(), limit).map_err(err)
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        st.history.list(before_id.as_deref(), limit).map_err(err)
+    })
+    .await
+    .map_err(err)?
 }
 
 #[tauri::command]
-pub fn search_history(state: S, query: String, limit: u32) -> Result<Vec<Dictation>, String> {
-    state.history.search(&query, limit).map_err(err)
+pub async fn search_history(
+    state: S<'_>,
+    query: String,
+    limit: u32,
+) -> Result<Vec<Dictation>, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || st.history.search(&query, limit).map_err(err))
+        .await
+        .map_err(err)?
 }
 
 #[tauri::command]
@@ -183,8 +211,16 @@ pub async fn export_history(state: S<'_>, kind: String, path: String) -> Result<
 }
 
 #[tauri::command]
-pub fn storage_usage(state: S) -> Result<u64, String> {
-    state.history.storage_bytes().map_err(err)
+pub async fn storage_usage(state: S<'_>) -> Result<u64, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || st.history.storage_bytes().map_err(err))
+        .await
+        .map_err(err)?
+}
+
+#[tauri::command]
+pub fn model_state(state: S) -> Result<ModelState, String> {
+    Ok(state.model_state())
 }
 
 // ---- models ----

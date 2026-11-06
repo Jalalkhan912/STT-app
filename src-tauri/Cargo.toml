@@ -26,9 +26,9 @@ cpal = "0.15"
 rubato = "0.16"
 arboard = { version = "3", default-features = false }
 enigo = "0.6"
-# Fork of rdev whose macOS listener builds key names safely (upstream 0.5 crashes
-# on recent macOS by calling keyboard-layout APIs off the main thread).
-rdev = { git = "https://github.com/rustdesk-org/rdev", rev = "0904f23ce496e255461a98848b85c11fa5a62eab" }
+# Vendored fork of rdev (rustdesk-org, rev 0904f23): its macOS listener builds key names safely
+# (upstream 0.5 crashes on recent macOS) and we re-enable the event tap when macOS disables it.
+rdev = { path = "../third_party/rdev" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 dictation-core = { path = "../crates/core", features = ["parakeet", "whisper-metal"] }
@@ -45,6 +45,12 @@ version = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
 version = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies.block2]
+version = "0.6"
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2]
+version = "0.6"
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-av-foundation]
 version = "0.3"

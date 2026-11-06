@@ -1,5 +1,5 @@
 use crate::paths;
-use crate::state::{now_ms, AppState};
+use crate::state::{now_ms, AppState, ModelState};
 use dictation_core::models::{self, EngineKind, ModelInfo};
 use dictation_core::speech::SpeechPipeline;
 use std::path::{Path, PathBuf};
@@ -53,10 +53,16 @@ fn build_pipeline(
 pub fn load_active(state: &AppState, vad_path: &Path, force: bool) -> Result<(), String> {
     let _serial = state.load_lock.lock().unwrap_or_else(|e| e.into_inner());
     if !force && state.speech.lock().map(|s| s.is_some()).unwrap_or(false) {
+        // Also corrects a "Loading" flag set by a press that raced another load.
+        state.set_model_state(ModelState::Ready);
         return Ok(());
     }
     let id = state.settings_snapshot().active_model;
-    let m = models::find(&id).ok_or_else(|| format!("unknown model {id}"))?;
+    let Some(m) = models::find(&id) else {
+        let msg = format!("unknown model {id}");
+        state.set_model_state(ModelState::Error(msg.clone()));
+        return Err(msg);
+    };
     let root = paths::models_dir();
     if !models::is_installed(&root, &m) {
         let old = state
@@ -65,11 +71,14 @@ pub fn load_active(state: &AppState, vad_path: &Path, force: bool) -> Result<(),
             .unwrap_or_else(|e| e.into_inner())
             .take();
         drop(old);
+        state.set_model_state(ModelState::None);
         return Err(format!("model {id} is not installed"));
     }
     log::info!("loading model {id}");
+    state.set_model_state(ModelState::Loading);
     let pipeline = build_pipeline(&root, &m, vad_path).map_err(|e| {
         log::error!("loading model {id} failed: {e}");
+        state.set_model_state(ModelState::Error(e.clone()));
         e
     })?;
     let old = state
@@ -79,6 +88,7 @@ pub fn load_active(state: &AppState, vad_path: &Path, force: bool) -> Result<(),
         .replace(Box::new(pipeline));
     drop(old);
     state.touch();
+    state.set_model_state(ModelState::Ready);
     log::info!("model {id} ready");
     Ok(())
 }
@@ -117,6 +127,7 @@ pub fn spawn_idle_unloader(state: Arc<AppState>) {
                 let old = guard.take();
                 drop(guard);
                 drop(old);
+                state.set_model_state(ModelState::None);
                 log::info!("model unloaded after {min} idle minutes");
             }
         }

@@ -1,6 +1,7 @@
 [workspace]
 members = ["crates/core", "src-tauri"]
 default-members = ["crates/core"]
+exclude = ["third_party"]
 resolver = "2"
 
 [profile.dev]

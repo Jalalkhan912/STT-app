@@ -5,6 +5,7 @@
     permissionStatus, requestPermission, setActiveModel, type ModelStatus, type PermissionKind,
     type PermissionStatus,
   } from "./api";
+  import { ModelStore } from "./modelstate.svelte";
   import { Downloads, percent } from "./downloads.svelte";
   import { formatBytes, hotkeyLabel } from "./format";
 
@@ -12,6 +13,8 @@
 
   const PARAKEET = "parakeet-tdt-0.6b-v2-int8";
   const dl = new Downloads();
+  const modelSt = new ModelStore();
+  const modelReady = $derived(modelSt.value.kind === "ready");
 
   let perms = $state(null as PermissionStatus | null);
   let model = $state(null as ModelStatus | null);
@@ -38,6 +41,7 @@
 
   onMount(() => {
     const stop = dl.listen();
+    const stopModel = modelSt.listen();
     (async () => {
       try {
         const [p, s] = await Promise.all([permissionStatus(), getSettings(), refreshModels()]);
@@ -60,6 +64,7 @@
     }, 2000);
     return () => {
       stop();
+      stopModel();
       clearInterval(poll);
     };
   });
@@ -149,7 +154,12 @@
         <div class="nav"><button class="primary" disabled={!anyInstalled} onclick={finishModel}>Continue</button></div>
       {:else if step === "try"}
         <p>Hold <strong>{hotkeyLabel(keys, isMac)}</strong> and speak. Release to paste. Try it here:</p>
-        <textarea rows="5" bind:value={test} placeholder="Your words will appear here"></textarea>
+        {#if modelSt.value.kind === "error"}
+          <p class="error small">Model failed to load: {modelSt.value.message}</p>
+        {:else if !modelReady}
+          <p class="muted small">Loading model…</p>
+        {/if}
+        <textarea rows="5" bind:value={test} disabled={!modelReady} placeholder="Your words will appear here"></textarea>
         <div class="nav"><button class="primary" onclick={ondone}>Done</button></div>
       {/if}
     {/if}

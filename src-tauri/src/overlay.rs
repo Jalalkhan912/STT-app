@@ -4,7 +4,7 @@
 //! `Overlay::set` is called from the controller thread. Every window or panel
 //! operation is dispatched with `run_on_main_thread` (AppKit and Win32 window
 //! calls must run on the UI thread); emitting events is thread-safe.
-use crate::state::AppState;
+use crate::state::{AppState, ModelState};
 use dictation_core::controller::{Overlay, OverlayState};
 use dictation_core::settings::OverlayPosition;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -108,6 +108,15 @@ impl TauriOverlay {
 
 impl Overlay for TauriOverlay {
     fn set(&self, s: OverlayState) {
+        // The controller only knows "no model"; while a load is running the
+        // honest message is "Loading model…". Mapped here because the load
+        // state lives in the app, and the core stays unaware of it.
+        let s = match s {
+            OverlayState::NoModel if self.state.model_state() == ModelState::Loading => {
+                OverlayState::Loading
+            }
+            other => other,
+        };
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let position = self.state.settings_snapshot().overlay_position;
         let app = self.app.clone();
@@ -120,6 +129,7 @@ impl Overlay for TauriOverlay {
             | OverlayState::Copied
             | OverlayState::MicError(_)
             | OverlayState::NoModel
+            | OverlayState::Loading
             | OverlayState::Error(_) => Some(Duration::from_millis(1800)),
             OverlayState::Recording | OverlayState::Processing => None,
         };

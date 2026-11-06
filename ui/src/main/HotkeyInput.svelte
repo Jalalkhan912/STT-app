@@ -26,8 +26,11 @@
     if (!recording) return;
     e.preventDefault();
     if (e.repeat) return;
-    if (!isSupportedKey(e.code)) {
-      note = "That key can't be used as a hotkey.";
+    if (!isSupportedKey(e.code, isMac)) {
+      note =
+        isMac && e.code === "CapsLock"
+          ? "Caps Lock can't be used as a hotkey on macOS."
+          : "That key can't be used as a hotkey.";
       return;
     }
     note = "";

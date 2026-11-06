@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getSettings, isMac, listModels, permissionStatus } from "./api";
+  import { ModelStore, modelBanner } from "./modelstate.svelte";
   import FirstRun from "./FirstRun.svelte";
   import History from "./History.svelte";
   import Settings from "./Settings.svelte";
@@ -11,6 +12,8 @@
   // null while the initial check runs.
   let needsSetup: boolean | null = $state(null);
   let activeMissing = $state(false);
+  const model = new ModelStore();
+  const banner = $derived(modelBanner(model.value));
 
   // Another model is installed but the active one is not: dictation would fail.
   async function checkActive() {
@@ -27,7 +30,13 @@
     if (needsSetup === false) checkActive();
   });
 
-  onMount(async () => {
+  onMount(() => {
+    const stop = model.listen();
+    startupCheck();
+    return stop;
+  });
+
+  async function startupCheck() {
     try {
       const [models, perms] = await Promise.all([listModels(), permissionStatus()]);
       const noModel = !models.some((m) => m.installed);
@@ -38,7 +47,7 @@
       console.warn("startup check failed", e);
       needsSetup = false;
     }
-  });
+  }
 
   const tabs: [Tab, string][] = [
     ["history", "History"],
@@ -59,6 +68,9 @@
       {/each}
     </nav>
     <main>
+      {#if banner}
+        <div class="banner" class:info={model.value.kind === "loading"}>{banner}</div>
+      {/if}
       {#if activeMissing && tab !== "models"}
         <div class="banner">
           Active model not installed —
@@ -86,5 +98,6 @@
     border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; margin-bottom: 12px;
     color: var(--danger);
   }
+  .banner.info { color: var(--muted); }
   main { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 20px; }
 </style>

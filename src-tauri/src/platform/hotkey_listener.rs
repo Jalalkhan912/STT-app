@@ -65,7 +65,10 @@ fn make_callback(
         if let Ok(latest) = spec.try_read() {
             if latest.keys != current.keys {
                 current = latest.clone();
-                tracker.set_spec(current.clone());
+                // Ends an in-progress hold under the old hotkey.
+                if let Some(ev) = tracker.set_spec(current.clone(), now_ms().max(0) as u64) {
+                    let _ = tx.send(ev);
+                }
             }
         }
         if let Some(ev) = tracker.on_key(code, down, now_ms().max(0) as u64) {

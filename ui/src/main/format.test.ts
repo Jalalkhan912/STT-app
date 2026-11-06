@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { groupByDay, formatBytes, formatDuration, hotkeyLabel } from "./format";
+import { groupByDay, formatBytes, formatDuration, hotkeyLabel, isSupportedKey } from "./format";
+import { modelBanner } from "./modelstate.svelte";
 import type { Dictation } from "./api";
 
 const DAY = 86_400_000;
@@ -60,5 +61,22 @@ describe("groupByDay", () => {
       }),
     ]);
     expect(g[0].items.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("isSupportedKey", () => {
+  it("rejects CapsLock on macOS only", () => {
+    expect(isSupportedKey("CapsLock", true)).toBe(false);
+    expect(isSupportedKey("CapsLock", false)).toBe(true);
+    expect(isSupportedKey("AltRight", true)).toBe(true);
+  });
+});
+
+describe("modelBanner", () => {
+  it("only shows for loading and error", () => {
+    expect(modelBanner({ kind: "loading" })).toBe("Loading model…");
+    expect(modelBanner({ kind: "error", message: "boom" })).toBe("Model failed to load: boom");
+    expect(modelBanner({ kind: "ready" })).toBeNull();
+    expect(modelBanner({ kind: "none" })).toBeNull();
   });
 });
